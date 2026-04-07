@@ -31,6 +31,15 @@ const SCALES: Record<Scale, number[]> = {
   pentatonic: [0, 3, 5, 7, 10]
 };
 
+const SVG_FRAMES = [
+  // Stand Star
+  "M 50,15 L 61,40 L 88,40 L 66,57 L 75,82 L 50,66 L 25,82 L 34,57 L 12,40 L 39,40 Z",
+  // Walk Star (Legs/Arms shifted)
+  "M 50,12 L 65,38 L 92,35 L 68,55 L 80,80 L 50,62 L 20,85 L 32,55 L 8,42 L 35,42 Z",
+  // Jump Star (Stretched)
+  "M 50,5 L 63,35 L 95,30 L 70,52 L 85,90 L 50,70 L 15,90 L 30,52 L 5,30 L 37,35 Z"
+];
+
 const INITIAL_STEPS: StepData[] = Array(16).fill(null).map((_, i) => ({
   note: 'C',
   octave: 0,
@@ -44,6 +53,11 @@ const INITIAL_STEPS: StepData[] = Array(16).fill(null).map((_, i) => ({
 export default function App() {
   const [isStarted, setIsStarted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // Define the image frames for the visualizer
+  // Replace these with your actual local paths once uploaded to /public
+  const lineaFrames = Array.from({ length: 15 }, (_, i) => `/linea${i + 1}.png`);
+
   const [currentStep, setCurrentStep] = useState(-1);
   const [bpm, setBpm] = useState(128);
   const [steps, setSteps] = useState<StepData[]>(INITIAL_STEPS);
@@ -65,6 +79,14 @@ export default function App() {
     osc2Detune: 7,
     oscMix: 0.3,
     visualizerColor: '#22d3ee',
+    colorScheme: 0,
+    glowIntensity: 0.5,
+    lineThickness: 4,
+    vibratoRate: 5,
+    vibratoDepth: 0,
+    bitcrush: 16,
+    chorus: 0,
+    useSvg: false,
     masterVolume: 0.7,
     scale: 'chromatic'
   });
@@ -78,6 +100,9 @@ export default function App() {
   const ampEnvRef = useRef<Tone.AmplitudeEnvelope | null>(null);
   const filterEnvRef = useRef<Tone.Envelope | null>(null);
   const distortionRef = useRef<Tone.Distortion | null>(null);
+  const bitcrushRef = useRef<Tone.BitCrusher | null>(null);
+  const chorusRef = useRef<Tone.Chorus | null>(null);
+  const vibratoRef = useRef<Tone.Vibrato | null>(null);
   const compressorRef = useRef<Tone.Compressor | null>(null);
   const masterGainRef = useRef<Tone.Gain | null>(null);
   const limiterRef = useRef<Tone.Limiter | null>(null);
@@ -108,14 +133,32 @@ export default function App() {
     const distortion = new Tone.Distortion({
       distortion: synthParams.drive,
       oversample: '4x'
-    }).connect(compressor);
+    });
+
+    const bitcrush = new Tone.BitCrusher({
+      bits: synthParams.bitcrush
+    }).connect(distortion);
+
+    const chorus = new Tone.Chorus({
+      frequency: 1.5,
+      delayTime: 3.5,
+      depth: 0.7,
+      wet: synthParams.chorus
+    }).connect(bitcrush);
+
+    const vibrato = new Tone.Vibrato({
+      frequency: synthParams.vibratoRate,
+      depth: synthParams.vibratoDepth
+    }).connect(chorus);
+
+    vibrato.connect(compressor);
 
     const filter = new Tone.Filter({
       frequency: synthParams.cutoff,
       type: 'lowpass',
       rolloff: -24,
       Q: synthParams.resonance * 8 // Slightly lower default Q
-    }).connect(distortion);
+    }).connect(vibrato);
 
     const ampEnv = new Tone.AmplitudeEnvelope({
       attack: synthParams.attack,
@@ -148,6 +191,9 @@ export default function App() {
     ampEnvRef.current = ampEnv;
     filterEnvRef.current = filterEnv as any;
     distortionRef.current = distortion;
+    bitcrushRef.current = bitcrush;
+    chorusRef.current = chorus;
+    vibratoRef.current = vibrato;
     compressorRef.current = compressor;
     masterGainRef.current = masterGain;
     limiterRef.current = limiter;
@@ -168,6 +214,13 @@ export default function App() {
     
     distortionRef.current.distortion = synthParams.drive * (synthParams.devilMode ? 1.5 : 1);
     
+    if (bitcrushRef.current) bitcrushRef.current.bits.value = synthParams.bitcrush;
+    if (chorusRef.current) chorusRef.current.wet.value = synthParams.chorus;
+    if (vibratoRef.current) {
+      vibratoRef.current.frequency.value = synthParams.vibratoRate;
+      vibratoRef.current.depth.value = synthParams.vibratoDepth;
+    }
+
     if (masterGainRef.current) {
       // Lower master gain as resonance/drive increases to avoid hitting limiter too hard
       const resCompensation = 1 - (synthParams.resonance * 0.4);
@@ -296,6 +349,14 @@ export default function App() {
     { name: 'Pure White', value: '#ffffff' }
   ];
 
+  useEffect(() => {
+    const index = Math.floor((synthParams.colorScheme / 100.1) * VISUALIZER_COLORS.length);
+    const newColor = VISUALIZER_COLORS[index].value;
+    if (newColor !== synthParams.visualizerColor) {
+      setSynthParams(prev => ({ ...prev, visualizerColor: newColor }));
+    }
+  }, [synthParams.colorScheme]);
+
   return (
     <div className="min-h-screen flex flex-col bg-zinc-950 p-4 md:p-8">
       {/* Header */}
@@ -372,6 +433,24 @@ export default function App() {
             <Knob label="Drive" min={0} max={1} step={0.01} value={synthParams.drive} onChange={(v) => setSynthParams(p => ({...p, drive: v}))} />
             <Knob label="Accent" min={0} max={1} step={0.01} value={synthParams.accent} onChange={(v) => setSynthParams(p => ({...p, accent: v}))} />
             <Knob label="Master" min={0} max={1} step={0.01} value={synthParams.masterVolume} onChange={(v) => setSynthParams(p => ({...p, masterVolume: v}))} />
+            <Knob label="Color" min={0} max={100} step={1} value={synthParams.colorScheme} onChange={(v) => setSynthParams(p => ({...p, colorScheme: v}))} />
+            <Knob label="Glow" min={0} max={1} step={0.01} value={synthParams.glowIntensity} onChange={(v) => setSynthParams(p => ({...p, glowIntensity: v}))} />
+            <Knob label="Line" min={1} max={10} step={0.5} value={synthParams.lineThickness} onChange={(v) => setSynthParams(p => ({...p, lineThickness: v}))} />
+            <Knob label="Vib Rate" min={0} max={10} step={0.1} value={synthParams.vibratoRate} onChange={(v) => setSynthParams(p => ({...p, vibratoRate: v}))} />
+            <Knob label="Vib Depth" min={0} max={1} step={0.01} value={synthParams.vibratoDepth} onChange={(v) => setSynthParams(p => ({...p, vibratoDepth: v}))} />
+            <Knob label="Crush" min={1} max={16} step={1} value={synthParams.bitcrush} onChange={(v) => setSynthParams(p => ({...p, bitcrush: v}))} />
+            <Knob label="Chorus" min={0} max={1} step={0.01} value={synthParams.chorus} onChange={(v) => setSynthParams(p => ({...p, chorus: v}))} />
+            
+            <div className="flex flex-col items-center gap-2">
+              <button 
+                onClick={() => setSynthParams(p => ({...p, useSvg: !p.useSvg}))}
+                className={`p-3 rounded-full transition-all ${synthParams.useSvg ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(34,211,238,0.5)]' : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700'}`}
+                title="Toggle SVG Morphing"
+              >
+                <Maximize2 size={18} />
+              </button>
+              <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">SVG</span>
+            </div>
           </div>
 
           <div className="mt-8 pt-8 border-t border-zinc-800 flex flex-col gap-6">
@@ -553,6 +632,15 @@ export default function App() {
               fft={fftRef.current}
               isPlaying={isPlaying} 
               color={synthParams.devilMode ? '#ef4444' : synthParams.visualizerColor} 
+              imageUrls={lineaFrames}
+              svgPaths={synthParams.useSvg ? SVG_FRAMES : []}
+              glowIntensity={synthParams.glowIntensity}
+              lineThickness={synthParams.lineThickness}
+              devilMode={synthParams.devilMode}
+              vibratoDepth={synthParams.vibratoDepth}
+              vibratoRate={synthParams.vibratoRate}
+              bitcrush={synthParams.bitcrush}
+              chorus={synthParams.chorus}
             />
           </div>
         </div>

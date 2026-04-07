@@ -31,6 +31,14 @@ export interface SynthState {
   osc2Detune: number;
   oscMix: number; // 0 to 1
   visualizerColor: string;
+  colorScheme: number; // 0 to 100 for knob
+  glowIntensity: number; // 0 to 1
+  lineThickness: number; // 1 to 10
+  vibratoRate: number; // 0 to 10
+  vibratoDepth: number; // 0 to 1
+  bitcrush: number; // 1 to 16
+  chorus: number; // 0 to 1
+  useSvg: boolean;
   masterVolume: number; // 0 to 1
   scale: Scale;
 }
